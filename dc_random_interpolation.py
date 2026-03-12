@@ -1,14 +1,23 @@
+import os
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, HistGradientBoostingRegressor
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, make_scorer
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.multioutput import MultiOutputRegressor
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
 
 CSV_PATH = "12-02-2025 raw sensor data.csv"
 RANDOM_SEED = 0
+OUT_DIR = "outputs"
 
 
 def pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
@@ -16,6 +25,28 @@ def pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
         if c in df.columns:
             return c
     raise KeyError(f"None of these columns exist: {candidates}")
+
+
+def eval_model(name: str, model, X_train, y_train, X_test, y_test):
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+
+    mae = mean_absolute_error(y_test, y_pred, multioutput="raw_values")
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred, multioutput="raw_values"))
+    r2 = r2_score(y_test, y_pred, multioutput="raw_values")
+
+    return {
+        "model": name,
+        "MAE": float(np.mean(mae)),
+        "RMSE": float(np.mean(rmse)),
+        "R2": float(np.mean(r2)),
+        "MAE_NO": float(mae[0]),
+        "MAE_NO2": float(mae[1]),
+        "RMSE_NO": float(rmse[0]),
+        "RMSE_NO2": float(rmse[1]),
+        "R2_NO": float(r2[0]),
+        "R2_NO2": float(r2[1]),
+    }
 
 
 # -----------------------------
@@ -100,33 +131,115 @@ print(f"\n[INFO] Train size = {len(y_train)}, Test size = {len(y_test)}")
 
 
 # -----------------------------
-# 4) Train model + evaluate
+# 4) Model zoo + selection
 # -----------------------------
 
-model = MultiOutputRegressor(HistGradientBoostingRegressor(
-    max_depth=4,
-    learning_rate=0.05,
-    max_iter=800,
-    random_state=RANDOM_SEED
-))
-model.fit(X_train, y_train)
+models = [
+    ("LinearRegression", LinearRegression()),
+    ("Ridge(alpha=1.0)", Ridge(alpha=1.0, random_state=RANDOM_SEED)),
+    ("Lasso(alpha=1e-3)", Lasso(alpha=1e-3, random_state=RANDOM_SEED, max_iter=10000)),
+    ("ElasticNet(alpha=1e-3,l1=0.5)", ElasticNet(alpha=1e-3, l1_ratio=0.5, random_state=RANDOM_SEED, max_iter=10000)),
 
-y_train_pred = model.predict(X_train)
-y_test_pred = model.predict(X_test)
+    ("SVR(RBF)", MultiOutputRegressor(Pipeline([
+        ("scaler", StandardScaler()),
+        ("svr", SVR(kernel="rbf", C=10.0, gamma="scale", epsilon=0.001)),
+    ]))),
+    ("KNN(k=5)", Pipeline([
+        ("scaler", StandardScaler()),
+        ("knn", KNeighborsRegressor(n_neighbors=5)),
+    ])),
+
+    ("DecisionTree", DecisionTreeRegressor(random_state=RANDOM_SEED, max_depth=5)),
+    ("RandomForest", RandomForestRegressor(
+        n_estimators=500, random_state=RANDOM_SEED, max_depth=None, min_samples_leaf=2
+    )),
+
+    ("GradientBoosting", MultiOutputRegressor(GradientBoostingRegressor(random_state=RANDOM_SEED))),
+    ("HistGradientBoosting", MultiOutputRegressor(HistGradientBoostingRegressor(random_state=RANDOM_SEED))),
+]
+
+results = []
+for name, model in models:
+    try:
+        results.append(eval_model(name, model, X_train, y_train, X_test, y_test))
+    except Exception as exc:
+        results.append({"model": name, "MAE": np.nan, "RMSE": np.nan, "R2": np.nan})
+        print(f"[WARN] Model failed: {name} -> {type(exc).__name__}: {exc}")
+
+res_df = pd.DataFrame(results).sort_values("R2", ascending=False).reset_index(drop=True)
+
+os.makedirs(OUT_DIR, exist_ok=True)
+res_path = os.path.join(OUT_DIR, "dc_random_interpolation_models.csv")
+res_df.to_csv(res_path, index=False)
+
+print("\n===== MODEL COMPARISON: DC Dense Interpolation + RANDOM =====")
+print(res_df.to_string(index=False, float_format=lambda x: f"{x:.6f}"))
+print(f"[INFO] Saved model comparison to {res_path}")
+
+
+# -----------------------------
+# 5) Tune the best model (limited search)
+# -----------------------------
+
+best_name = res_df.iloc[0]["model"]
+print(f"\n[INFO] Best model by R2: {best_name}")
+
+best_model = None
+for name, mdl in models:
+    if name == best_name:
+        best_model = mdl
+        break
+
+if best_model is None:
+    raise RuntimeError(f"Could not find model object for: {best_name}")
+
+best_params = None
+
+# Tune only for KNN or RandomForest (others skipped for simplicity)
+if best_name.startswith("KNN"):
+    scorer = make_scorer(r2_score, multioutput="uniform_average")
+    grid = {
+        "knn__n_neighbors": [3, 5, 7, 9, 11],
+        "knn__weights": ["uniform", "distance"],
+        "knn__p": [1, 2],
+    }
+    search = GridSearchCV(best_model, grid, scoring=scorer, cv=3, n_jobs=-1)
+    search.fit(X_train, y_train)
+    best_model = search.best_estimator_
+    best_params = search.best_params_
+elif best_name == "RandomForest":
+    scorer = make_scorer(r2_score, multioutput="uniform_average")
+    grid = {
+        "n_estimators": [200, 500],
+        "max_depth": [None, 8, 16],
+        "min_samples_leaf": [1, 2, 4],
+    }
+    search = GridSearchCV(best_model, grid, scoring=scorer, cv=3, n_jobs=-1)
+    search.fit(X_train, y_train)
+    best_model = search.best_estimator_
+    best_params = search.best_params_
+else:
+    print("[INFO] Skipping tuning for this model type.")
+
+if best_params:
+    print(f"[INFO] Best tuned params: {best_params}")
+
+
+# -----------------------------
+# 6) Final fit + metrics + plots
+# -----------------------------
+
+best_model.fit(X_train, y_train)
+y_test_pred = best_model.predict(X_test)
 
 mae = mean_absolute_error(y_test, y_test_pred, multioutput="raw_values")
 rmse = np.sqrt(mean_squared_error(y_test, y_test_pred, multioutput="raw_values"))
 r2 = r2_score(y_test, y_test_pred, multioutput="raw_values")
 
-print("\n===== RESULTS: Dense Interpolation (NO LAG) + DC RANDOM SPLIT =====")
+print("\n===== BEST MODEL RESULTS (DC DENSE + RANDOM) =====")
 print(f"MAE  = {float(np.mean(mae)):.6f} (NO={mae[0]:.6f}, NO2={mae[1]:.6f})")
 print(f"RMSE = {float(np.mean(rmse)):.6f} (NO={rmse[0]:.6f}, NO2={rmse[1]:.6f})")
 print(f"R^2  = {float(np.mean(r2)):.6f} (NO={r2[0]:.6f}, NO2={r2[1]:.6f})")
-
-
-# -----------------------------
-# 5) Plots (test)
-# -----------------------------
 
 order_test = np.argsort(t_test)
 
@@ -134,7 +247,7 @@ fig, axes = plt.subplots(2, 1, sharex=True)
 axes[0].plot(t_test[order_test], y_test[order_test, 0], label="NO True (test)", linewidth=2)
 axes[0].plot(t_test[order_test], y_test_pred[order_test, 0], label="NO Predicted (test)", linewidth=2)
 axes[0].set_ylabel("NO (ppm)")
-axes[0].set_title("DC Random Split: NO")
+axes[0].set_title(f"DC Dense Random: NO ({best_name})")
 axes[0].grid(True)
 axes[0].legend()
 
@@ -142,8 +255,12 @@ axes[1].plot(t_test[order_test], y_test[order_test, 1], label="NO2 True (test)",
 axes[1].plot(t_test[order_test], y_test_pred[order_test, 1], label="NO2 Predicted (test)", linewidth=2)
 axes[1].set_xlabel("Time (s) on DC grid")
 axes[1].set_ylabel("NO2 (ppm)")
-axes[1].set_title("DC Random Split: NO2")
+axes[1].set_title(f"DC Dense Random: NO2 ({best_name})")
 axes[1].grid(True)
 axes[1].legend()
 
+fig_path = os.path.join(OUT_DIR, "dc_random_interpolation_best.png")
+plt.tight_layout()
+plt.savefig(fig_path, dpi=150)
 plt.show()
+print(f"[INFO] Saved plot to {fig_path}")

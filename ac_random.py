@@ -1,10 +1,12 @@
+import os
+
 import numpy as np
 import pandas as pd
 
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, make_scorer
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.multioutput import MultiOutputRegressor
 
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
@@ -16,6 +18,7 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, H
 
 CSV_PATH = "12-02-2025 raw sensor data.csv"
 RANDOM_SEED = 0
+OUT_DIR = "outputs"
 
 
 def pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
@@ -181,6 +184,11 @@ res_df = pd.DataFrame(results).sort_values("R2", ascending=False).reset_index(dr
 print("\n===== MODEL COMPARISON (NO/NO2 OUTPUTS) - RANDOM 50/50 =====")
 print(res_df.to_string(index=False, float_format=lambda x: f"{x:.6f}"))
 
+os.makedirs(OUT_DIR, exist_ok=True)
+res_path = os.path.join(OUT_DIR, "ac_random_models.csv")
+res_df.to_csv(res_path, index=False)
+print(f"[INFO] Saved model comparison to {res_path}")
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -190,6 +198,7 @@ import numpy as np
 
 # 1) Find best model name from results
 best_name = res_df.iloc[0]["model"]
+best_name_plot = best_name
 print(f"\n[INFO] Best model by R2: {best_name}")
 
 # 2) Retrieve the actual model object from your models list
@@ -201,6 +210,40 @@ for name, mdl in models:
 
 if best_model is None:
     raise RuntimeError(f"Could not find model object for: {best_name}")
+
+best_params = None
+if best_name.startswith("KNN"):
+    scorer = make_scorer(r2_score, multioutput="uniform_average")
+    grid = {
+        "knn__n_neighbors": [3, 5, 7, 9, 11],
+        "knn__weights": ["uniform", "distance"],
+        "knn__p": [1, 2],
+    }
+    search = GridSearchCV(best_model, grid, scoring=scorer, cv=3, n_jobs=-1)
+    search.fit(X_train, y_train)
+    best_model = search.best_estimator_
+    best_params = search.best_params_
+elif best_name == "RandomForest":
+    scorer = make_scorer(r2_score, multioutput="uniform_average")
+    grid = {
+        "n_estimators": [200, 500],
+        "max_depth": [None, 8, 16],
+        "min_samples_leaf": [1, 2, 4],
+    }
+    search = GridSearchCV(best_model, grid, scoring=scorer, cv=3, n_jobs=-1)
+    search.fit(X_train, y_train)
+    best_model = search.best_estimator_
+    best_params = search.best_params_
+else:
+    print("[INFO] Skipping tuning for this model type.")
+
+if best_params:
+    print(f"[INFO] Best tuned params: {best_params}")
+    if best_name.startswith("KNN"):
+        best_name_plot = (
+            f"KNN(k={best_params['knn__n_neighbors']},"
+            f"w={best_params['knn__weights']},p={best_params['knn__p']})"
+        )
 
 # 3) Fit best model and predict on test
 best_model.fit(X_train, y_train)
@@ -227,7 +270,7 @@ fig, axes = plt.subplots(2, 1, sharex=True)
 axes[0].plot(t_sorted, y_sorted[:, 0], label="NO True (test)", linewidth=2)
 axes[0].plot(t_sorted, pred_sorted[:, 0], label="NO Predicted (test)", linewidth=2)
 axes[0].set_ylabel("NO (ppm)")
-axes[0].set_title(f"Best Model Test Fit (NO): {best_name}")
+axes[0].set_title(f"Best Model Test Fit (NO): {best_name_plot}")
 axes[0].grid(True)
 axes[0].legend()
 
@@ -235,9 +278,13 @@ axes[1].plot(t_sorted, y_sorted[:, 1], label="NO2 True (test)", linewidth=2)
 axes[1].plot(t_sorted, pred_sorted[:, 1], label="NO2 Predicted (test)", linewidth=2)
 axes[1].set_xlabel("t_gas_round (s)")
 axes[1].set_ylabel("NO2 (ppm)")
-axes[1].set_title(f"Best Model Test Fit (NO2): {best_name}")
+axes[1].set_title(f"Best Model Test Fit (NO2): {best_name_plot}")
 axes[1].grid(True)
 axes[1].legend()
 
+fig_path = os.path.join(OUT_DIR, "ac_random_best.png")
+plt.tight_layout()
+plt.savefig(fig_path, dpi=150)
 plt.show()
+print(f"[INFO] Saved plot to {fig_path}")
 

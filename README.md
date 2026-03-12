@@ -24,7 +24,7 @@ AC alignment + random split model zoo:
 .venv/bin/python ac_random.py
 ```
 
-AC dense interpolation + random split:
+AC dense interpolation + random split :
 
 ```bash
 .venv/bin/python ac_random_interpolation.py

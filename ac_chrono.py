@@ -4,6 +4,7 @@ import pandas as pd
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.multioutput import MultiOutputRegressor
 
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
 from sklearn.svm import SVR
@@ -94,15 +95,15 @@ def align_gas_to_ac(df: pd.DataFrame) -> pd.DataFrame:
     return gas_df
 
 
-def chronological_split(gas_df: pd.DataFrame, target_col: str):
+def chronological_split(gas_df: pd.DataFrame):
     """
     50/50 chronological split based on rounded gas time.
-    X = [NO, NO2]
-    y = aligned target column (Right or Left)
+    X = [AC_right_aligned, AC_left_aligned]
+    y = [NO, NO2]
     """
     d = gas_df.sort_values("t_gas_round").reset_index(drop=True)
-    X = d[["NO", "NO2"]].to_numpy()
-    y = d[target_col].to_numpy()
+    X = d[["AC_right_aligned", "AC_left_aligned"]].to_numpy()
+    y = d[["NO", "NO2"]].to_numpy()
     t = d["t_gas_round"].to_numpy()
 
     n = len(d)
@@ -116,11 +117,23 @@ def eval_model(name: str, model, X_train, y_train, X_test, y_test):
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
 
-    mae = mean_absolute_error(y_test, y_pred)
-    rmse = mean_squared_error(y_test, y_pred, squared=False)
-    r2 = r2_score(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred, multioutput="raw_values")
+    mse = mean_squared_error(y_test, y_pred, multioutput="raw_values")
+    rmse = np.sqrt(mse)
+    r2 = r2_score(y_test, y_pred, multioutput="raw_values")
 
-    return {"model": name, "MAE": mae, "RMSE": rmse, "R2": r2}
+    return {
+        "model": name,
+        "MAE": float(np.mean(mae)),
+        "RMSE": float(np.mean(rmse)),
+        "R2": float(np.mean(r2)),
+        "MAE_NO": float(mae[0]),
+        "MAE_NO2": float(mae[1]),
+        "RMSE_NO": float(rmse[0]),
+        "RMSE_NO2": float(rmse[1]),
+        "R2_NO": float(r2[0]),
+        "R2_NO2": float(r2[1]),
+    }
 
 
 # -----------------------------
@@ -129,8 +142,8 @@ def eval_model(name: str, model, X_train, y_train, X_test, y_test):
 df = pd.read_csv(CSV_PATH, low_memory=False)
 gas_df = align_gas_to_ac(df)
 
-# RIGHT target first (as you asked)
-X_train, y_train, X_test, y_test, t_test = chronological_split(gas_df, "AC_right_aligned")
+# Inputs = AC (right/left), Outputs = NO/NO2
+X_train, y_train, X_test, y_test, t_test = chronological_split(gas_df)
 print(f"\n[INFO] Train size = {len(y_train)}, Test size = {len(y_test)}")
 
 # Define model zoo (no feature engineering)
@@ -141,7 +154,7 @@ models = [
     ("ElasticNet(alpha=1e-3,l1=0.5)", ElasticNet(alpha=1e-3, l1_ratio=0.5, random_state=RANDOM_SEED, max_iter=10000)),
 
     # Needs scaling
-    ("SVR(RBF)", Pipeline([("scaler", StandardScaler()), ("svr", SVR(kernel="rbf", C=10.0, gamma="scale", epsilon=0.001))])),
+    ("SVR(RBF)", MultiOutputRegressor(Pipeline([("scaler", StandardScaler()), ("svr", SVR(kernel="rbf", C=10.0, gamma="scale", epsilon=0.001))]))),
     ("KNN(k=5)", Pipeline([("scaler", StandardScaler()), ("knn", KNeighborsRegressor(n_neighbors=5))])),
 
     ("DecisionTree", DecisionTreeRegressor(random_state=RANDOM_SEED, max_depth=5)),
@@ -149,8 +162,8 @@ models = [
         n_estimators=500, random_state=RANDOM_SEED, max_depth=None, min_samples_leaf=2
     )),
 
-    ("GradientBoosting", GradientBoostingRegressor(random_state=RANDOM_SEED)),
-    ("HistGradientBoosting", HistGradientBoostingRegressor(random_state=RANDOM_SEED)),
+    ("GradientBoosting", MultiOutputRegressor(GradientBoostingRegressor(random_state=RANDOM_SEED))),
+    ("HistGradientBoosting", MultiOutputRegressor(HistGradientBoostingRegressor(random_state=RANDOM_SEED))),
 ]
 
 results = []
@@ -164,6 +177,6 @@ for name, model in models:
 res_df = pd.DataFrame(results)
 res_df = res_df.sort_values("R2", ascending=False).reset_index(drop=True)
 
-print("\n===== MODEL COMPARISON (RIGHT) =====")
+print("\n===== MODEL COMPARISON (NO/NO2 OUTPUTS) =====")
 print(res_df.to_string(index=False, float_format=lambda x: f"{x:.6f}"))
 

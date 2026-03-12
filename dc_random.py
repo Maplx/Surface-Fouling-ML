@@ -26,72 +26,66 @@ def pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
     raise KeyError(f"None of these columns exist: {candidates}")
 
 
-def align_gas_to_ac(df: pd.DataFrame) -> pd.DataFrame:
+def align_gas_to_dc(df: pd.DataFrame) -> pd.DataFrame:
     """
     Treat CSV as two sequences:
-      AC series: (AC-time, AC-right, AC-left)
+      DC series: (Time-sensor, R-right, R-left)
       Gas series: (Time-gas, NO, NO2)
     Round gas time to integer seconds, and for each gas sample,
-    interpolate AC signals at that rounded second on the AC time axis.
+    interpolate DC resistance at that rounded second on the DC time axis.
 
     Returns a gas_df with aligned targets and timestamps.
     """
-    # Column names (support .1 variants)
-    c_t_ac = pick_col(df, ["AC-time/s", "AC-time/s.1"])
-    c_right = pick_col(df, ["AC-NO-600C-Right", "AC-NO-600C-Right.1"])
-    c_left = pick_col(df, ["AC-NO-600C-Left", "AC-NO-600C-Left.1"])
+    c_t_dc = pick_col(df, ["Time-sensor (s)", "Time-sensor (s).1"])
+    c_right = pick_col(df, ["NO-600-Resistance (ohm)-Right", "NO-600-Resistance (ohm)-Right.1"])
+    c_left = pick_col(df, ["NO-600-Resistance (ohm)-left", "NO-600-Resistance (ohm)-left.1"])
 
     c_t_gas = pick_col(df, ["Time-gas (s)", "Time-gas (s).1"])
     c_no = pick_col(df, ["NO concentration (ppm)", "NO concentration (ppm).1"])
     c_no2 = pick_col(df, ["NO2 concentration (ppm)", "NO2 concentration (ppm).1"])
 
-    # Build AC series
-    ac_df = df[[c_t_ac, c_right, c_left]].copy().dropna()
-    ac_df = ac_df.rename(columns={c_t_ac: "t_ac", c_right: "y_right", c_left: "y_left"})
+    dc_df = df[[c_t_dc, c_right, c_left]].copy().dropna()
+    dc_df = dc_df.rename(columns={c_t_dc: "t_dc", c_right: "r_right", c_left: "r_left"})
 
-    # Build Gas series
     gas_df = df[[c_t_gas, c_no, c_no2]].copy().dropna().reset_index(drop=True)
     gas_df = gas_df.rename(columns={c_t_gas: "t_gas", c_no: "NO", c_no2: "NO2"})
 
-    print(f"[INFO] AC rows:  {len(ac_df)}")
+    print(f"[INFO] DC rows:  {len(dc_df)}")
     print(f"[INFO] Gas rows: {len(gas_df)}")
 
-    # Round gas time to integer seconds
     gas_df["t_gas_round"] = gas_df["t_gas"].round().astype(int)
 
-    # Prepare AC data for interpolation: sort and average duplicates by AC-time
-    ac_sorted = (ac_df.groupby("t_ac", as_index=False)[["y_right", "y_left"]]
+    dc_sorted = (dc_df.groupby("t_dc", as_index=False)[["r_right", "r_left"]]
                  .mean()
-                 .sort_values("t_ac")
+                 .sort_values("t_dc")
                  .reset_index(drop=True))
 
-    t_ac = ac_sorted["t_ac"].to_numpy()
-    yR = ac_sorted["y_right"].to_numpy()
-    yL = ac_sorted["y_left"].to_numpy()
+    t_dc = dc_sorted["t_dc"].to_numpy()
+    rR = dc_sorted["r_right"].to_numpy()
+    rL = dc_sorted["r_left"].to_numpy()
 
-    # Query times on AC timeline = rounded gas seconds
     t_query = gas_df["t_gas_round"].to_numpy().astype(float)
 
-    t_min, t_max = float(t_ac.min()), float(t_ac.max())
+    t_min, t_max = float(t_dc.min()), float(t_dc.max())
     out_of_range = (t_query < t_min) | (t_query > t_max)
     num_oor = int(out_of_range.sum())
 
-    print(f"[INFO] AC time range: [{t_min}, {t_max}]")
+    print(f"[INFO] DC time range: [{t_min}, {t_max}]")
     print(f"[INFO] Gas rounded seconds range: [{t_query.min()}, {t_query.max()}]")
     print(f"[INFO] Out-of-range queries: {num_oor}")
 
     if num_oor > 0:
-        print("[WARN] Some rounded gas times are outside AC range; clipping to preserve sample size.")
+        print("[WARN] Some rounded gas times are outside DC range; clipping to preserve sample size.")
         t_query = np.clip(t_query, t_min, t_max)
 
-    gas_df["t_ac_used"] = t_query
-    gas_df["AC_right_aligned"] = np.interp(t_query, t_ac, yR)
-    gas_df["AC_left_aligned"] = np.interp(t_query, t_ac, yL)
+    gas_df["t_dc_used"] = t_query
+    gas_df["R_right_aligned"] = np.interp(t_query, t_dc, rR)
+    gas_df["R_left_aligned"] = np.interp(t_query, t_dc, rL)
 
     print(f"[INFO] Aligned samples: {len(gas_df)} (should equal gas rows)")
     print("\n[Aligned sample preview]")
-    print(gas_df[["t_gas", "t_gas_round", "t_ac_used", "NO", "NO2",
-                  "AC_right_aligned", "AC_left_aligned"]].head(8))
+    print(gas_df[["t_gas", "t_gas_round", "t_dc_used", "NO", "NO2",
+                  "R_right_aligned", "R_left_aligned"]].head(8))
 
     return gas_df
 
@@ -99,11 +93,11 @@ def align_gas_to_ac(df: pd.DataFrame) -> pd.DataFrame:
 def random_split(gas_df: pd.DataFrame, test_size: float = 0.5):
     """
     Random 50/50 split (shuffle).
-    X = [AC_right_aligned, AC_left_aligned]
+    X = [R_right_aligned, R_left_aligned]
     y = [NO, NO2]
     """
     d = gas_df.copy()
-    X = d[["AC_right_aligned", "AC_left_aligned"]].to_numpy()
+    X = d[["R_right_aligned", "R_left_aligned"]].to_numpy()
     y = d[["NO", "NO2"]].to_numpy()
     t = d["t_gas_round"].to_numpy()
 
@@ -139,25 +133,28 @@ def eval_model(name: str, model, X_train, y_train, X_test, y_test):
 # -----------------------------
 # Main
 # -----------------------------
-df = pd.read_csv(CSV_PATH, low_memory=False)
-gas_df = align_gas_to_ac(df)
 
-# Inputs = AC (right/left), Outputs = NO/NO2
+df = pd.read_csv(CSV_PATH, low_memory=False)
+
+gas_df = align_gas_to_dc(df)
+
 X_train, y_train, X_test, y_test, t_test = random_split(gas_df, test_size=0.5)
 print(f"\n[INFO] Train size = {len(y_train)}, Test size = {len(y_test)}")
 
-# Define model zoo (no feature engineering)
 models = [
     ("LinearRegression", LinearRegression()),
     ("Ridge(alpha=1.0)", Ridge(alpha=1.0, random_state=RANDOM_SEED)),
     ("Lasso(alpha=1e-3)", Lasso(alpha=1e-3, random_state=RANDOM_SEED, max_iter=10000)),
     ("ElasticNet(alpha=1e-3,l1=0.5)", ElasticNet(alpha=1e-3, l1_ratio=0.5, random_state=RANDOM_SEED, max_iter=10000)),
 
-    # Needs scaling
-    ("SVR(RBF)", MultiOutputRegressor(Pipeline([("scaler", StandardScaler()),
-                          ("svr", SVR(kernel="rbf", C=10.0, gamma="scale", epsilon=0.001))]))),
-    ("KNN(k=5)", Pipeline([("scaler", StandardScaler()),
-                           ("knn", KNeighborsRegressor(n_neighbors=5))])),
+    ("SVR(RBF)", MultiOutputRegressor(Pipeline([
+        ("scaler", StandardScaler()),
+        ("svr", SVR(kernel="rbf", C=10.0, gamma="scale", epsilon=0.001)),
+    ]))),
+    ("KNN(k=5)", Pipeline([
+        ("scaler", StandardScaler()),
+        ("knn", KNeighborsRegressor(n_neighbors=5)),
+    ])),
 
     ("DecisionTree", DecisionTreeRegressor(random_state=RANDOM_SEED, max_depth=5)),
     ("RandomForest", RandomForestRegressor(
@@ -178,21 +175,14 @@ for name, model in models:
 
 res_df = pd.DataFrame(results).sort_values("R2", ascending=False).reset_index(drop=True)
 
-print("\n===== MODEL COMPARISON (NO/NO2 OUTPUTS) - RANDOM 50/50 =====")
+print("\n===== MODEL COMPARISON (NO/NO2 OUTPUTS) - DC RANDOM 50/50 =====")
 print(res_df.to_string(index=False, float_format=lambda x: f"{x:.6f}"))
 
 import matplotlib.pyplot as plt
-import numpy as np
 
-# -----------------------------
-# Plot best model on TEST set
-# -----------------------------
-
-# 1) Find best model name from results
 best_name = res_df.iloc[0]["model"]
 print(f"\n[INFO] Best model by R2: {best_name}")
 
-# 2) Retrieve the actual model object from your models list
 best_model = None
 for name, mdl in models:
     if name == best_name:
@@ -202,17 +192,14 @@ for name, mdl in models:
 if best_model is None:
     raise RuntimeError(f"Could not find model object for: {best_name}")
 
-# 3) Fit best model and predict on test
 best_model.fit(X_train, y_train)
 y_test_pred = best_model.predict(X_test)
 
-# 4) Sort test points by time for a clean line plot
 order = np.argsort(t_test)
 t_sorted = t_test[order]
 y_sorted = y_test[order]
 pred_sorted = y_test_pred[order]
 
-# 5) Print a small preview for sanity check
 print("\n[TEST sample preview sorted by time]")
 preview = min(12, len(t_sorted))
 for i in range(preview):
@@ -222,7 +209,6 @@ for i in range(preview):
         f"NO2_true={y_sorted[i, 1]:.6f}  NO2_pred={pred_sorted[i, 1]:.6f}"
     )
 
-# 6) Plot: True vs Predicted (test) over time for NO and NO2
 fig, axes = plt.subplots(2, 1, sharex=True)
 axes[0].plot(t_sorted, y_sorted[:, 0], label="NO True (test)", linewidth=2)
 axes[0].plot(t_sorted, pred_sorted[:, 0], label="NO Predicted (test)", linewidth=2)
@@ -240,4 +226,3 @@ axes[1].grid(True)
 axes[1].legend()
 
 plt.show()
-

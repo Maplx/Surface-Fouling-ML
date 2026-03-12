@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.multioutput import MultiOutputRegressor
 
 CSV_PATH = "12-02-2025 raw sensor data.csv"
 RANDOM_SEED = 0
@@ -66,12 +67,14 @@ NO2_dense = np.interp(t_gas_query, gas["t_gas"].to_numpy(), gas["NO2"].to_numpy(
 
 # Interpolate AC onto same grid
 AC_right_dense = np.interp(t_grid, ac["t_ac"].to_numpy(), ac["AC_right"].to_numpy())
+AC_left_dense = np.interp(t_grid, ac["t_ac"].to_numpy(), ac["AC_left"].to_numpy())
 
 dense = pd.DataFrame({
     "t": t_grid,
     "NO_interp": NO_dense,
     "NO2_interp": NO2_dense,
     "AC_right": AC_right_dense,
+    "AC_left": AC_left_dense,
 })
 
 print(f"[INFO] Dense dataset rows: {len(dense)}")
@@ -81,10 +84,10 @@ print(dense.head(10))
 
 # -----------------------------
 # 3) Train/test split (50/50 chronological)
-#    X = [NO_interp, NO2_interp], y = AC_right
+#    X = [AC_right, AC_left], y = [NO_interp, NO2_interp]
 # -----------------------------
-X = dense[["NO_interp", "NO2_interp"]].to_numpy()
-y = dense["AC_right"].to_numpy()
+X = dense[["AC_right", "AC_left"]].to_numpy()
+y = dense[["NO_interp", "NO2_interp"]].to_numpy()
 t = dense["t"].to_numpy()
 
 n = len(dense)
@@ -93,52 +96,44 @@ split = n // 2
 X_train, y_train = X[:split], y[:split]
 X_test, y_test, t_test = X[split:], y[split:], t[split:]
 
-model = HistGradientBoostingRegressor(
+model = MultiOutputRegressor(HistGradientBoostingRegressor(
     max_depth=4,
     learning_rate=0.05,
     max_iter=800,
     random_state=RANDOM_SEED
-)
+))
 model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 
-mae = mean_absolute_error(y_test, y_pred)
-rmse = mean_squared_error(y_test, y_pred, squared=False)
-r2 = r2_score(y_test, y_pred)
+mae = mean_absolute_error(y_test, y_pred, multioutput="raw_values")
+rmse = np.sqrt(mean_squared_error(y_test, y_pred, multioutput="raw_values"))
+r2 = r2_score(y_test, y_pred, multioutput="raw_values")
 
 print("\n===== RESULTS: Dense Interpolation (NO LAG) =====")
 print(f"Train size = {len(y_train)}, Test size = {len(y_test)}")
-print(f"MAE  = {mae:.6f}")
-print(f"RMSE = {rmse:.6f}")
-print(f"R^2  = {r2:.6f}")
+print(f"MAE  = {float(np.mean(mae)):.6f} (NO={mae[0]:.6f}, NO2={mae[1]:.6f})")
+print(f"RMSE = {float(np.mean(rmse)):.6f} (NO={rmse[0]:.6f}, NO2={rmse[1]:.6f})")
+print(f"R^2  = {float(np.mean(r2)):.6f} (NO={r2[0]:.6f}, NO2={r2[1]:.6f})")
 
 
-y_train_pred = model.predict(X_train)
-'''
 # -----------------------------
-# 5) Plot True vs Pred on TRAIN half
+# 4) Plot True vs Pred on test half (NO and NO2)
 # -----------------------------
-plt.figure()
-plt.plot(t[:split], y_train, label="True (train)", linewidth=2)
-plt.plot(t[:split], y_train_pred, label="Predicted (train)", linewidth=2)
-plt.xlabel("Time (s) on AC grid")
-plt.ylabel("AC_right")
-plt.title("Dense Interpolation (no lag): True vs Predicted (Train Half)")
-plt.grid(True)
-plt.legend()
-plt.show()
-'''
+fig, axes = plt.subplots(2, 1, sharex=True)
+axes[0].plot(t_test, y_test[:, 0], label="NO True (test)", linewidth=2)
+axes[0].plot(t_test, y_pred[:, 0], label="NO Predicted (test)", linewidth=2)
+axes[0].set_ylabel("NO (ppm)")
+axes[0].set_title("Dense Interpolation (no lag): NO")
+axes[0].grid(True)
+axes[0].legend()
 
-# -----------------------------
-# 4) Plot True vs Pred on test half
-# -----------------------------
-plt.figure()
-plt.plot(t_test, y_test, label="True (test)", linewidth=2)
-plt.plot(t_test, y_pred, label="Predicted (test)", linewidth=2)
-plt.xlabel("Time (s) on AC grid")
-plt.ylabel("AC_right")
-plt.title("Dense Interpolation (no lag): True vs Predicted")
-plt.grid(True)
-plt.legend()
+axes[1].plot(t_test, y_test[:, 1], label="NO2 True (test)", linewidth=2)
+axes[1].plot(t_test, y_pred[:, 1], label="NO2 Predicted (test)", linewidth=2)
+axes[1].set_xlabel("Time (s) on AC grid")
+axes[1].set_ylabel("NO2 (ppm)")
+axes[1].set_title("Dense Interpolation (no lag): NO2")
+axes[1].grid(True)
+axes[1].legend()
+
 plt.show()
 

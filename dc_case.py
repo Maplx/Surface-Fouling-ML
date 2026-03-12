@@ -74,7 +74,7 @@ y_pred = model.predict(X_test)
 # 5) Evaluation
 # -----------------------------
 mae = mean_absolute_error(y_test, y_pred)
-rmse = mean_squared_error(y_test, y_pred, squared=False)
+rmse = np.sqrt(mean_squared_error(y_test, y_pred))
 r2 = r2_score(y_test, y_pred)
 
 print("\n===== RESULTS: DC NOx @ 600C =====")

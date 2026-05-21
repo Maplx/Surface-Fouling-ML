@@ -9,13 +9,14 @@ from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 
-CSV_PATH = "12-02-2025 raw sensor data.csv"   
+XLSX_PATH = "12-02-2025 raw sensor data.xlsx"
+SHEET_NAME = "Sheet1"
 RANDOM_SEED = 42
 
 # -----------------------------
 # 1) Load raw CSV
 # -----------------------------
-df = pd.read_csv(CSV_PATH, low_memory=False)
+df = pd.read_excel(XLSX_PATH, sheet_name=SHEET_NAME)
 
 # DC mode NOx @ 600C appears in the first ~209 rows with valid values.
 # Extract the exact columns for that experiment.

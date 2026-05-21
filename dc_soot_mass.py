@@ -1,3 +1,17 @@
+"""
+Predict remaining soot mass (Soot left-mg, from the 'calculation' sheet) from
+DC resistance and temperature, using the page-7 DC soot block on Sheet1.
+
+Alignment logic:
+  - The 'calculation' sheet has 412 rows of (CO2-DC-ppm, Soot left-%, Soot left-mg).
+  - On Sheet1, the page-7 DC block has 412 jointly-non-null rows of
+    (Time-DC, Temp-DC, CO2-DC). These rows align row-by-row with 'calculation'.
+  - Resistance lives on a separate time axis (TIME-sensor, 1898 rows). We
+    interpolate Resistance onto the 412 Time-DC values to get one R per
+    (Temp-DC, Soot left-mg) row.
+  - Features X = [Resistance, Temp-DC], target y = Soot left-mg. 412 samples.
+"""
+
 import os
 
 import numpy as np
@@ -8,7 +22,6 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, H
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, make_scorer
 from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.multioutput import MultiOutputRegressor
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -16,19 +29,10 @@ from sklearn.svm import SVR
 from sklearn.tree import DecisionTreeRegressor
 
 XLSX_PATH = "12-02-2025 raw sensor data.xlsx"
-SHEET_NAME = "Sheet1"
+SHEET_RAW = "Sheet1"
+SHEET_CALC = "calculation"
 RANDOM_SEED = 0
 OUT_DIR = "outputs"
-
-# Explicit column names for the page-7 DC soot block (Sheet1 cols 14-19).
-# Sheet1 also contains a page-7 AC block and page-9 blocks that reuse some of
-# these names with pandas-appended ".1" suffixes; hard-coding avoids picking
-# the wrong block via duplicate-name fallback.
-COL_TIME_DC      = "Time-DC"       # shared time axis for Temp-DC and CO2-DC
-COL_TEMP_DC      = "Temp-DC"
-COL_CO2_DC       = "CO2-DC"
-COL_TIME_SENSOR  = "TIME-sensor"   # time axis for Resistance (different from Time-DC)
-COL_RESISTANCE   = "Resistance"
 
 
 def eval_model(name: str, model, X_train, y_train, X_test, y_test):
@@ -39,95 +43,70 @@ def eval_model(name: str, model, X_train, y_train, X_test, y_test):
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     r2 = r2_score(y_test, y_pred)
 
-    return {
-        "model": name,
-        "MAE": float(mae),
-        "RMSE": float(rmse),
-        "R2": float(r2),
-    }
+    return {"model": name, "MAE": float(mae), "RMSE": float(rmse), "R2": float(r2)}
 
 
-def build_aligned_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    c_t_res = COL_TIME_SENSOR
-    c_res = COL_RESISTANCE
+def build_dataset() -> pd.DataFrame:
+    raw = pd.read_excel(XLSX_PATH, sheet_name=SHEET_RAW)
+    calc = pd.read_excel(XLSX_PATH, sheet_name=SHEET_CALC)
 
-    # Temp-DC and CO2-DC share the Time-DC axis (412 jointly-non-null rows).
-    c_t_temp = COL_TIME_DC
-    c_temp = COL_TEMP_DC
+    # Page-7 DC block on Sheet1: (Time-DC, Temp-DC, CO2-DC) share one axis,
+    # 412 jointly-non-null rows. The calculation sheet has 412 rows aligned
+    # row-by-row with those, so we take the dropna() subset and concat.
+    page7 = (raw[["Time-DC", "Temp-DC", "CO2-DC"]]
+             .dropna()
+             .reset_index(drop=True))
 
-    c_t_co2 = COL_TIME_DC
-    c_co2 = COL_CO2_DC
+    print(f"[INFO] page-7 (Time-DC,Temp-DC,CO2-DC) rows: {len(page7)}")
+    print(f"[INFO] calculation sheet rows:               {len(calc)}")
 
-    res_df = df[[c_t_res, c_res]].dropna().copy()
-    res_df = res_df.rename(columns={c_t_res: "t_res", c_res: "resistance"})
-    res_df["t_res"] = pd.to_numeric(res_df["t_res"], errors="coerce")
-    res_df["resistance"] = pd.to_numeric(res_df["resistance"], errors="coerce")
-    res_df = res_df.dropna()
-    res_df = (res_df.groupby("t_res", as_index=False)[["resistance"]]
-              .mean()
-              .sort_values("t_res")
-              .reset_index(drop=True))
+    if len(page7) != len(calc):
+        raise RuntimeError(
+            f"Row count mismatch: page-7 DC block has {len(page7)} rows but "
+            f"'calculation' sheet has {len(calc)}. Cannot align row-by-row."
+        )
 
-    temp_df = df[[c_t_temp, c_temp]].dropna().copy()
-    temp_df = temp_df.rename(columns={c_t_temp: "t_temp", c_temp: "temp"})
-    temp_df["t_temp"] = pd.to_numeric(temp_df["t_temp"], errors="coerce")
-    temp_df["temp"] = pd.to_numeric(temp_df["temp"], errors="coerce")
-    temp_df = temp_df.dropna()
-    temp_df = (temp_df.groupby("t_temp", as_index=False)[["temp"]]
-               .mean()
-               .sort_values("t_temp")
-               .reset_index(drop=True))
+    # Sanity-check the CO2 column matches between the two sheets.
+    co2_diff = np.abs(page7["CO2-DC"].to_numpy() - calc["CO2-DC-ppm"].to_numpy())
+    print(f"[INFO] CO2-DC vs CO2-DC-ppm max abs diff: {co2_diff.max():.6f} "
+          f"(should be ~0 if rows really align)")
 
-    co2_df = df[[c_t_co2, c_co2]].dropna().copy()
-    co2_df = co2_df.rename(columns={c_t_co2: "t_co2", c_co2: "co2"})
-    co2_df["t_co2"] = pd.to_numeric(co2_df["t_co2"], errors="coerce")
-    co2_df["co2"] = pd.to_numeric(co2_df["co2"], errors="coerce")
-    co2_df = co2_df.dropna()
-    co2_df = (co2_df.groupby("t_co2", as_index=False)[["co2"]]
-              .mean()
-              .sort_values("t_co2")
-              .reset_index(drop=True))
+    df = pd.concat(
+        [page7.reset_index(drop=True), calc.reset_index(drop=True)],
+        axis=1,
+    )
 
-    t_res = res_df["t_res"].to_numpy()
-    res = res_df["resistance"].to_numpy()
+    # Resistance lives on TIME-sensor. Interpolate it onto Time-DC.
+    rs = (raw[["TIME-sensor", "Resistance"]]
+          .dropna()
+          .groupby("TIME-sensor", as_index=False)["Resistance"]
+          .mean()
+          .sort_values("TIME-sensor")
+          .reset_index(drop=True))
 
-    t_temp = temp_df["t_temp"].to_numpy()
-    temp = temp_df["temp"].to_numpy()
+    t_dc = df["Time-DC"].to_numpy(dtype=float)
+    t_rs = rs["TIME-sensor"].to_numpy(dtype=float)
+    r = rs["Resistance"].to_numpy(dtype=float)
 
-    t_co2 = co2_df["t_co2"].to_numpy()
-    co2 = co2_df["co2"].to_numpy()
+    # Clip queries to the resistance time range, then linear-interp.
+    t_query = np.clip(t_dc, t_rs.min(), t_rs.max())
+    df["Resistance"] = np.interp(t_query, t_rs, r)
 
-    # Oxidation rate = d(CO2)/d(time)
-    ox_rate = np.gradient(co2, t_co2)
+    print("\n[Dataset preview]")
+    print(df.head(8))
 
-    temp_aligned = np.interp(t_res, t_temp, temp)
-    ox_aligned = np.interp(t_res, t_co2, ox_rate)
-
-    aligned = pd.DataFrame({
-        "t": t_res,
-        "resistance": res,
-        "temp": temp_aligned,
-        "ox_rate": ox_aligned,
-    })
-
-    print(f"[INFO] Aligned rows: {len(aligned)}")
-    print("\n[Aligned preview]")
-    print(aligned.head(8))
-
-    return aligned
+    return df
 
 
 # -----------------------------
 # Main
 # -----------------------------
 
-df = pd.read_excel(XLSX_PATH, sheet_name=SHEET_NAME)
+data = build_dataset()
 
-data = build_aligned_dataframe(df)
-
-X = data[["resistance", "temp"]].to_numpy()
-y = data["ox_rate"].to_numpy()
-t = data["t"].to_numpy()
+X = data[["Resistance", "Temp-DC"]].to_numpy()
+y = data["Soot left-mg"].to_numpy()
+t = data["Time-DC"].to_numpy()
 
 X_train, X_test, y_train, y_test, t_train, t_test = train_test_split(
     X, y, t, test_size=0.5, shuffle=True, random_state=RANDOM_SEED
@@ -170,10 +149,10 @@ for name, model in models:
 res_df = pd.DataFrame(results).sort_values("R2", ascending=False).reset_index(drop=True)
 
 os.makedirs(OUT_DIR, exist_ok=True)
-res_path = os.path.join(OUT_DIR, "dc_soot_ox_random_models.csv")
+res_path = os.path.join(OUT_DIR, "dc_soot_mass_models.csv")
 res_df.to_csv(res_path, index=False)
 
-print("\n===== MODEL COMPARISON: DC Ox Rate (Aligned) =====")
+print("\n===== MODEL COMPARISON: DC Soot Left (mg) =====")
 print(res_df.to_string(index=False, float_format=lambda x: f"{x:.6f}"))
 print(f"[INFO] Saved model comparison to {res_path}")
 
@@ -231,23 +210,23 @@ mae = mean_absolute_error(y_test, y_test_pred)
 rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
 r2 = r2_score(y_test, y_test_pred)
 
-print("\n===== BEST MODEL RESULTS (DC Ox Rate Aligned) =====")
-print(f"MAE  = {mae:.6f}")
-print(f"RMSE = {rmse:.6f}")
+print("\n===== BEST MODEL RESULTS (DC Soot Left mg) =====")
+print(f"MAE  = {mae:.6f} mg")
+print(f"RMSE = {rmse:.6f} mg")
 print(f"R^2  = {r2:.6f}")
 
 order = np.argsort(t_test)
 
 plt.figure()
-plt.plot(t_test[order], y_test[order], label="Ox Rate True", linewidth=2)
-plt.plot(t_test[order], y_test_pred[order], label="Ox Rate Pred", linewidth=2)
-plt.xlabel("Time (s)")
-plt.ylabel("Ox Rate")
-plt.title(f"Aligned DC: Ox Rate ({best_name_plot})")
+plt.plot(t_test[order], y_test[order], label="Soot left True", linewidth=2)
+plt.plot(t_test[order], y_test_pred[order], label="Soot left Pred", linewidth=2)
+plt.xlabel("Time-DC (s)")
+plt.ylabel("Soot left (mg)")
+plt.title(f"DC Soot Mass: True vs Predicted ({best_name_plot})")
 plt.grid(True)
 plt.legend()
 
-fig_path = os.path.join(OUT_DIR, "dc_soot_ox_random_best.png")
+fig_path = os.path.join(OUT_DIR, "dc_soot_mass_best.png")
 plt.tight_layout()
 plt.savefig(fig_path, dpi=150)
 plt.show()

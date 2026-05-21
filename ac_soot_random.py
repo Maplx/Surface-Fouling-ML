@@ -14,16 +14,19 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
 from sklearn.tree import DecisionTreeRegressor
 
-CSV_PATH = "12-02-2025 raw sensor data.csv"
+XLSX_PATH = "12-02-2025 raw sensor data.xlsx"
+SHEET_NAME = "Sheet1"
 RANDOM_SEED = 0
 OUT_DIR = "outputs"
 
-
-def pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
-    for c in candidates:
-        if c in df.columns:
-            return c
-    raise KeyError(f"None of these columns exist: {candidates}")
+# Explicit column names for the page-7 AC soot block (Sheet1 cols 20-25).
+# AC soot has a SINGLE impedance channel (no left/right split); only the
+# leading-space column name " Z/ohm" belongs to this block.
+COL_TIME_GAS = "Time"           # shared time axis for CO2 and Temp
+COL_CO2      = "CO2"
+COL_TEMP     = "Temp"
+COL_TIME_Z   = "Time-sensor"    # time axis for impedance
+COL_Z        = " Z/ohm"         # leading space is intentional
 
 
 def eval_model(name: str, model, X_train, y_train, X_test, y_test):
@@ -43,26 +46,20 @@ def eval_model(name: str, model, X_train, y_train, X_test, y_test):
 
 
 def build_aligned_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    c_t_ac = pick_col(df, ["AC-time/s", "AC-time/s.1"])
-    c_right = pick_col(df, ["AC-NO-600C-Right", "AC-NO-600C-Right.1"])
-    c_left = pick_col(df, ["AC-NO-600C-Left", "AC-NO-600C-Left.1"])
-
-    c_t_temp = pick_col(df, ["Time-DC", "Time-DC.1"])
-    c_temp = pick_col(df, ["Temp-DC", "Temp-DC.1", "Temp"])
-
-    c_t_co2 = pick_col(df, ["Time-CO2", "Time-CO2.1"])
-    c_co2 = pick_col(df, ["CO2-DC", "CO2-DC.1"])
-
-    ac_df = df[[c_t_ac, c_right, c_left]].dropna().copy()
-    ac_df = ac_df.rename(columns={c_t_ac: "t_ac", c_right: "ac_right", c_left: "ac_left"})
+    ac_df = df[[COL_TIME_Z, COL_Z]].dropna().copy()
+    ac_df = ac_df.rename(columns={COL_TIME_Z: "t_ac", COL_Z: "z"})
     ac_df["t_ac"] = pd.to_numeric(ac_df["t_ac"], errors="coerce")
-    ac_df["ac_right"] = pd.to_numeric(ac_df["ac_right"], errors="coerce")
-    ac_df["ac_left"] = pd.to_numeric(ac_df["ac_left"], errors="coerce")
+    ac_df["z"] = pd.to_numeric(ac_df["z"], errors="coerce")
     ac_df = ac_df.dropna()
-    ac_df = (ac_df.groupby("t_ac", as_index=False)[["ac_right", "ac_left"]]
+    ac_df = (ac_df.groupby("t_ac", as_index=False)[["z"]]
              .mean()
              .sort_values("t_ac")
              .reset_index(drop=True))
+
+    c_t_temp = COL_TIME_GAS
+    c_temp = COL_TEMP
+    c_t_co2 = COL_TIME_GAS
+    c_co2 = COL_CO2
 
     temp_df = df[[c_t_temp, c_temp]].dropna().copy()
     temp_df = temp_df.rename(columns={c_t_temp: "t_temp", c_temp: "temp"})
@@ -85,8 +82,7 @@ def build_aligned_dataframe(df: pd.DataFrame) -> pd.DataFrame:
               .reset_index(drop=True))
 
     t_ac = ac_df["t_ac"].to_numpy()
-    ac_right = ac_df["ac_right"].to_numpy()
-    ac_left = ac_df["ac_left"].to_numpy()
+    z = ac_df["z"].to_numpy()
 
     t_temp = temp_df["t_temp"].to_numpy()
     temp = temp_df["temp"].to_numpy()
@@ -102,8 +98,7 @@ def build_aligned_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     aligned = pd.DataFrame({
         "t": t_ac,
-        "ac_right": ac_right,
-        "ac_left": ac_left,
+        "z": z,
         "temp": temp_aligned,
         "ox_rate": ox_aligned,
     })
@@ -119,11 +114,11 @@ def build_aligned_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # Main
 # -----------------------------
 
-df = pd.read_csv(CSV_PATH, low_memory=False)
+df = pd.read_excel(XLSX_PATH, sheet_name=SHEET_NAME)
 
 data = build_aligned_dataframe(df)
 
-X = data[["ac_right", "ac_left", "temp"]].to_numpy()
+X = data[["z", "temp"]].to_numpy()
 y = data["ox_rate"].to_numpy()
 t = data["t"].to_numpy()
 

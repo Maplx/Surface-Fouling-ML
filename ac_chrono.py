@@ -13,7 +13,8 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, HistGradientBoostingRegressor
 
 
-CSV_PATH = "12-02-2025 raw sensor data.csv"
+XLSX_PATH = "12-02-2025 raw sensor data.xlsx"
+SHEET_NAME = "Sheet1"
 RANDOM_SEED = 0
 
 
@@ -139,7 +140,7 @@ def eval_model(name: str, model, X_train, y_train, X_test, y_test):
 # -----------------------------
 # Main
 # -----------------------------
-df = pd.read_csv(CSV_PATH, low_memory=False)
+df = pd.read_excel(XLSX_PATH, sheet_name=SHEET_NAME)
 gas_df = align_gas_to_ac(df)
 
 # Inputs = AC (right/left), Outputs = NO/NO2

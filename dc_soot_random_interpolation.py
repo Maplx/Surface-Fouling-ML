@@ -15,16 +15,18 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
 from sklearn.tree import DecisionTreeRegressor
 
-CSV_PATH = "12-02-2025 raw sensor data.csv"
+XLSX_PATH = "12-02-2025 raw sensor data.xlsx"
+SHEET_NAME = "Sheet1"
 RANDOM_SEED = 0
 OUT_DIR = "outputs"
 
-
-def pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
-    for c in candidates:
-        if c in df.columns:
-            return c
-    raise KeyError(f"None of these columns exist: {candidates}")
+# Explicit column names for the page-7 DC soot block (Sheet1 cols 14-19);
+# avoids picking the wrong block when Sheet1 has duplicate column names.
+COL_TIME_DC      = "Time-DC"       # shared time axis for Temp-DC and CO2-DC
+COL_TEMP_DC      = "Temp-DC"
+COL_CO2_DC       = "CO2-DC"
+COL_TIME_SENSOR  = "TIME-sensor"   # time axis for Resistance
+COL_RESISTANCE   = "Resistance"
 
 
 def eval_model(name: str, model, X_train, y_train, X_test, y_test):
@@ -44,14 +46,15 @@ def eval_model(name: str, model, X_train, y_train, X_test, y_test):
 
 
 def build_dense_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    c_t_res = pick_col(df, ["Time-sensor", "TIME-sensor", "Time-sensor (s)", "Time-sensor.1"])
-    c_res = pick_col(df, ["Resistance", "Resistance.1"])
+    c_t_res = COL_TIME_SENSOR
+    c_res = COL_RESISTANCE
 
-    c_t_temp = pick_col(df, ["Time-DC", "Time-DC.1"])
-    c_temp = pick_col(df, ["Temp-DC", "Temp-DC.1", "Temp"])
+    # Temp-DC and CO2-DC share the Time-DC axis on page 7.
+    c_t_temp = COL_TIME_DC
+    c_temp = COL_TEMP_DC
 
-    c_t_co2 = pick_col(df, ["Time-CO2", "Time-CO2.1"])
-    c_co2 = pick_col(df, ["CO2-DC", "CO2-DC.1"])
+    c_t_co2 = COL_TIME_DC
+    c_co2 = COL_CO2_DC
 
     res_df = df[[c_t_res, c_res]].dropna().copy()
     res_df = res_df.rename(columns={c_t_res: "t_res", c_res: "resistance"})
@@ -120,7 +123,7 @@ def build_dense_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # Main
 # -----------------------------
 
-df = pd.read_csv(CSV_PATH, low_memory=False)
+df = pd.read_excel(XLSX_PATH, sheet_name=SHEET_NAME)
 
 data = build_dense_dataframe(df)
 

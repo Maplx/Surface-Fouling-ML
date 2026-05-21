@@ -6,7 +6,8 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.multioutput import MultiOutputRegressor
 
-CSV_PATH = "12-02-2025 raw sensor data.csv"
+XLSX_PATH = "12-02-2025 raw sensor data.xlsx"
+SHEET_NAME = "Sheet1"
 RANDOM_SEED = 0
 
 
@@ -20,7 +21,7 @@ def pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
 # -----------------------------
 # 1) Load + extract AC series and Gas series
 # -----------------------------
-df = pd.read_csv(CSV_PATH, low_memory=False)
+df = pd.read_excel(XLSX_PATH, sheet_name=SHEET_NAME)
 
 c_t_ac = pick_col(df, ["AC-time/s", "AC-time/s.1"])
 c_right = pick_col(df, ["AC-NO-600C-Right", "AC-NO-600C-Right.1"])

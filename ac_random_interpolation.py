@@ -15,7 +15,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
 from sklearn.tree import DecisionTreeRegressor
 
-CSV_PATH = "12-02-2025 raw sensor data.csv"
+XLSX_PATH = "12-02-2025 raw sensor data.xlsx"
+SHEET_NAME = "Sheet1"
 RANDOM_SEED = 0
 OUT_DIR = "outputs"
 
@@ -53,7 +54,7 @@ def eval_model(name: str, model, X_train, y_train, X_test, y_test):
 # 1) Load + extract AC series and Gas series
 # -----------------------------
 
-df = pd.read_csv(CSV_PATH, low_memory=False)
+df = pd.read_excel(XLSX_PATH, sheet_name=SHEET_NAME)
 
 c_t_ac = pick_col(df, ["AC-time/s", "AC-time/s.1"])
 c_right = pick_col(df, ["AC-NO-600C-Right", "AC-NO-600C-Right.1"])

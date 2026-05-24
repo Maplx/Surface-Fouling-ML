@@ -1,0 +1,15 @@
+RandomForest feature importance (resistance + temp, sums to 1):
+  Resistance    : 0.0125
+  Temperature   : 0.9875
+
+GradientBoosting feature importance:
+  Resistance    : 0.0174
+  Temperature   : 0.9826
+
+Ridge coefficients on z-scored features (magnitude comparable):
+  Resistance    : -8.4344e-02
+  Temperature   : -2.7501e-01
+  intercept    : +2.7508e-01
+
+Best model under resistance only:    DecisionTree
+Best model under resistance + temp:  SVR(RBF)

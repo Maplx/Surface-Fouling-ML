@@ -20,11 +20,11 @@ Feature progression (all random 50/50, seed=0):
     [cumR] only          -> near-perfect on its own  (cumR is the key signal)
 
 Outputs (next to this script):
-  figure_feature_progression.png   2x2 measured-vs-predicted, window highlighted
-  figure_cumR_signal.png           R, dR/dt and cumR over time (what cumR is)
-  candidates_summary.csv           every feature set: best model, R2, MAE in/out
-  predictions_R_dRdt_cumR.csv      true vs predicted for the headline set
-  predictions_cumR_only.csv        true vs predicted for cumR alone
+  figures/figure_feature_progression.png   2x2 measured-vs-predicted, window highlighted
+  figures/figure_cumR_signal.png           R, dR/dt and cumR over time (what cumR is)
+  data/candidates_summary.csv              every feature set: best model, R2, MAE in/out
+  data/predictions_R_dRdt_cumR.csv         true vs predicted for the headline set
+  data/predictions_cumR_only.csv           true vs predicted for cumR alone
 
 Run:  python soot_mass_sensor_signals/03_resistance_derived_features/run.py
 """
@@ -49,6 +49,10 @@ SEED = 0
 ZONE = (6000.0, 12000.0)
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "..", "datasets", "native_379.csv")
+FIG = os.path.join(HERE, "figures")   # all .png go here
+DAT = os.path.join(HERE, "data")      # all .csv go here
+os.makedirs(FIG, exist_ok=True)
+os.makedirs(DAT, exist_ok=True)
 
 
 def model_zoo():
@@ -119,7 +123,7 @@ for label, cols in CANDIDATES:
                          "MAE_in_window_mg": mae_in, "MAE_out_mg": mae_out})
     print(f"{label:<22} {bn:<22} {r2:>+9.4f} {mae_in:>9.4f} {mae_out:>9.4f}")
 
-pd.DataFrame(summary_rows).to_csv(os.path.join(HERE, "candidates_summary.csv"), index=False)
+pd.DataFrame(summary_rows).to_csv(os.path.join(DAT, "candidates_summary.csv"), index=False)
 
 # ---- prediction CSVs for the two headline sets ----
 for label, fname in [("[R, dR/dt, cumR]", "predictions_R_dRdt_cumR.csv"),
@@ -127,7 +131,7 @@ for label, fname in [("[R, dR/dt, cumR]", "predictions_R_dRdt_cumR.csv"),
     _, _, pred, yte, tte = results[label]
     pd.DataFrame({"Time-DC": tte, "Soot left-mg": yte,
                   "Soot left-mg (pred)": pred}).sort_values("Time-DC").to_csv(
-        os.path.join(HERE, fname), index=False)
+        os.path.join(DAT, fname), index=False)
 
 # ---- FIGURE 1: 2x2 feature progression ----
 fig, axes = plt.subplots(2, 2, figsize=(15, 9), sharey=True)
@@ -147,7 +151,7 @@ for ax, (label, _) in zip(axes.flatten(), CANDIDATES):
 fig.suptitle("Act 3 — R-derived features recover the prediction; cumR is the key signal "
              "(random 50/50, native 379)", fontsize=13, y=1.00)
 plt.tight_layout()
-fig.savefig(os.path.join(HERE, "figure_feature_progression.png"), dpi=150, bbox_inches="tight")
+fig.savefig(os.path.join(FIG, "figure_feature_progression.png"), dpi=150, bbox_inches="tight")
 plt.close()
 
 # ---- FIGURE 2: what cumR is (R, dR/dt, cumR over time) ----
@@ -163,7 +167,7 @@ for a in ax:
     a.grid(alpha=0.3)
 fig.suptitle("Act 3 — the R-derived signals (red band = oxidation window)", fontsize=12, y=1.00)
 plt.tight_layout()
-fig.savefig(os.path.join(HERE, "figure_cumR_signal.png"), dpi=150, bbox_inches="tight")
+fig.savefig(os.path.join(FIG, "figure_cumR_signal.png"), dpi=150, bbox_inches="tight")
 plt.close()
 
 print(f"\n[DONE] artifacts in {HERE}")

@@ -12,16 +12,17 @@ predict), and a single evaluation scheme — a random 50/50 train/test split wit
 more than it helped.
 
 The story runs in three acts, one folder each. Every figure has the script that
-made it sitting right next to it, along with the actual numbers behind the
-plot — both the true-vs-predicted values we drew, and the full leaderboard of all
-ten models we tried, so you can see why a given "best model" won.
+made it, plus the actual numbers behind the plot — both the true-vs-predicted
+values we drew, and the full leaderboard of all ten models we tried, so you can
+see why a given "best model" won. Inside each act folder the plots live in
+`figures/` and the CSVs in `data/`.
 
 ```
 soot_mass_sensor_signals/
 ├── datasets/native_379.csv
-├── 01_temperature_reveal/
-├── 02_predict_T_from_R/
-├── 03_resistance_derived_features/
+├── 01_temperature_reveal/            run.py + figures/ + data/
+├── 02_predict_T_from_R/              run.py + figures/ + data/
+├── 03_resistance_derived_features/   run.py + figures/ + data/
 └── _archive/          ← older time-split / dense-interpolation work, kept for reference
 ```
 
@@ -33,7 +34,7 @@ obvious approach falls apart.
 ## Act 1 — resistance can't do it alone, but temperature can
 
 [`01_temperature_reveal/`](01_temperature_reveal/) — figure
-[`figure_R_T_RT.png`](01_temperature_reveal/figure_R_T_RT.png), script
+[`figures/figure_R_T_RT.png`](01_temperature_reveal/figures/figure_R_T_RT.png), script
 [`run.py`](01_temperature_reveal/run.py)
 
 We started by predicting soot mass three ways — from resistance alone, from
@@ -53,13 +54,13 @@ here's the catch. Temperature *by itself* is already nearly perfect, and putting
 resistance on top of it changes essentially nothing. So whatever makes `R+T` look
 so good, it isn't the resistance. The temperature is carrying the whole thing.
 
-(The plotted values are in `predictions_{R,T,RT}.csv`; the full model rankings,
-best first, in `leaderboard_{R,T,RT}.csv`.)
+(The plotted values are in `data/predictions_{R,T,RT}.csv`; the full model
+rankings, best first, in `data/leaderboard_{R,T,RT}.csv`.)
 
 ## Act 2 — so what do resistance and temperature have to do with each other?
 
 [`02_predict_T_from_R/`](02_predict_T_from_R/) — figure
-[`figure_T_from_R.png`](02_predict_T_from_R/figure_T_from_R.png), script
+[`figures/figure_T_from_R.png`](02_predict_T_from_R/figures/figure_T_from_R.png), script
 [`run.py`](02_predict_T_from_R/run.py)
 
 If temperature is what matters, the natural next question is how faithfully
@@ -85,8 +86,8 @@ carry enough information here.
 ## Act 3 — giving resistance its memory back
 
 [`03_resistance_derived_features/`](03_resistance_derived_features/) — figures
-[`figure_feature_progression.png`](03_resistance_derived_features/figure_feature_progression.png)
-and [`figure_cumR_signal.png`](03_resistance_derived_features/figure_cumR_signal.png),
+[`figures/figure_feature_progression.png`](03_resistance_derived_features/figures/figure_feature_progression.png)
+and [`figures/figure_cumR_signal.png`](03_resistance_derived_features/figures/figure_cumR_signal.png),
 script [`run.py`](03_resistance_derived_features/run.py)
 
 If the trouble is that one resistance value can't see the history of the process,
@@ -135,7 +136,8 @@ python soot_mass_sensor_signals/03_resistance_derived_features/run.py
 ```
 
 Each script stands on its own, reads only `datasets/native_379.csv`, writes its
-figures and CSVs beside itself, and is deterministic at `seed=0`.
+plots to its own `figures/` and its CSVs to its own `data/`, and is deterministic
+at `seed=0`.
 
 A note on the data: `native_379.csv` was aligned from `12-02-2025 raw sensor
 data.xlsx` (time, temperature and resistance from `Sheet1`, soot mass from the

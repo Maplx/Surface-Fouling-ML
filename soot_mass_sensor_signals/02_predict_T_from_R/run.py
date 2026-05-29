@@ -13,9 +13,9 @@ Story this figure tells:
     grip on soot mass -- the two failures are the same failure.
 
 Outputs (next to this script):
-  figure_T_from_R.png       measured vs predicted Temperature over time
-  leaderboard.csv           full 10-model leaderboard (best = top row)
-  predictions.csv           true vs predicted Temperature at each test point
+  figures/figure_T_from_R.png   measured vs predicted Temperature over time
+  data/leaderboard.csv          full 10-model leaderboard (best = top row)
+  data/predictions.csv          true vs predicted Temperature at each test point
 
 Run:  python soot_mass_sensor_signals/02_predict_T_from_R/run.py
 """
@@ -40,6 +40,10 @@ SEED = 0
 ZONE = (6000.0, 12000.0)
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "..", "datasets", "native_379.csv")
+FIG = os.path.join(HERE, "figures")   # all .png go here
+DAT = os.path.join(HERE, "data")      # all .csv go here
+os.makedirs(FIG, exist_ok=True)
+os.makedirs(DAT, exist_ok=True)
 
 
 def model_zoo():
@@ -81,10 +85,10 @@ for name, model in model_zoo():
         best = {"name": name, "r2": r2, "pred": pred}
 
 lb = pd.DataFrame(rows).sort_values("R2", ascending=False).reset_index(drop=True)
-lb.to_csv(os.path.join(HERE, "leaderboard.csv"), index=False)
+lb.to_csv(os.path.join(DAT, "leaderboard.csv"), index=False)
 
 pred_df = pd.DataFrame({"Time-DC": tte, "Temp-DC": yte, "Temp-DC (pred)": best["pred"]})
-pred_df.sort_values("Time-DC").to_csv(os.path.join(HERE, "predictions.csv"), index=False)
+pred_df.sort_values("Time-DC").to_csv(os.path.join(DAT, "predictions.csv"), index=False)
 
 m = (tte >= ZONE[0]) & (tte <= ZONE[1])
 mae_in = mean_absolute_error(yte[m], best["pred"][m])
@@ -103,7 +107,7 @@ ax.set_title(f"Act 2 — Predict Temperature from Resistance (random 50/50, nati
 ax.grid(alpha=0.3)
 ax.legend(loc="best")
 plt.tight_layout()
-fig.savefig(os.path.join(HERE, "figure_T_from_R.png"), dpi=150, bbox_inches="tight")
+fig.savefig(os.path.join(FIG, "figure_T_from_R.png"), dpi=150, bbox_inches="tight")
 plt.close()
 
 print(f"best={best['name']}  R2={best['r2']:+.4f}  "

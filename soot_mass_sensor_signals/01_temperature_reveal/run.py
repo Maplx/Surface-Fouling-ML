@@ -16,13 +16,13 @@ Story this figure tells:
     comes essentially entirely from Temperature, not Resistance.
 
 Outputs (next to this script):
-  figure_R_T_RT.png         one figure, three panels (R / T / R+T)
-  leaderboard_R.csv         full 10-model leaderboard, R only   (best = top row)
-  leaderboard_T.csv         full 10-model leaderboard, T only
-  leaderboard_RT.csv        full 10-model leaderboard, R + T
-  predictions_R.csv         true vs predicted soot mass at each test point (R)
-  predictions_T.csv         true vs predicted soot mass at each test point (T)
-  predictions_RT.csv        true vs predicted soot mass at each test point (R+T)
+  figures/figure_R_T_RT.png   one figure, three panels (R / T / R+T)
+  data/leaderboard_R.csv      full 10-model leaderboard, R only   (best = top row)
+  data/leaderboard_T.csv      full 10-model leaderboard, T only
+  data/leaderboard_RT.csv     full 10-model leaderboard, R + T
+  data/predictions_R.csv      true vs predicted soot mass at each test point (R)
+  data/predictions_T.csv      true vs predicted soot mass at each test point (T)
+  data/predictions_RT.csv     true vs predicted soot mass at each test point (R+T)
 
 Run:  python soot_mass_sensor_signals/01_temperature_reveal/run.py
 """
@@ -47,6 +47,10 @@ SEED = 0
 ZONE = (6000.0, 12000.0)            # active-oxidation window (the hard region)
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "..", "datasets", "native_379.csv")
+FIG = os.path.join(HERE, "figures")   # all .png go here
+DAT = os.path.join(HERE, "data")      # all .csv go here
+os.makedirs(FIG, exist_ok=True)
+os.makedirs(DAT, exist_ok=True)
 
 
 def model_zoo():
@@ -113,14 +117,14 @@ for ax, (key, pretty, cols) in zip(axes, FEATURE_SETS):
     mae_in, mae_out = zone_mae(tte, yte, best_pred)
 
     # leaderboard CSV (best model = top row)
-    lb.to_csv(os.path.join(HERE, f"leaderboard_{key}.csv"), index=False)
+    lb.to_csv(os.path.join(DAT, f"leaderboard_{key}.csv"), index=False)
 
     # predictions CSV (the data behind the plot: true vs predicted)
     pred_df = pd.DataFrame({"Time-DC": tte,
                             "Soot left-mg": yte,
                             "Soot left-mg (pred)": best_pred})
     pred_df.sort_values("Time-DC").to_csv(
-        os.path.join(HERE, f"predictions_{key}.csv"), index=False)
+        os.path.join(DAT, f"predictions_{key}.csv"), index=False)
 
     # plot
     o = np.argsort(tte)
@@ -138,13 +142,13 @@ fig.suptitle("Act 1 — Resistance alone fails in the oxidation window; "
              "the perfect fit comes from Temperature (random 50/50, native 379)",
              fontsize=13, y=1.02)
 plt.tight_layout()
-fig.savefig(os.path.join(HERE, "figure_R_T_RT.png"), dpi=150, bbox_inches="tight")
+fig.savefig(os.path.join(FIG, "figure_R_T_RT.png"), dpi=150, bbox_inches="tight")
 plt.close()
 
 # console summary (re-read top rows for a tidy table)
 for key, pretty, _ in FEATURE_SETS:
-    lb = pd.read_csv(os.path.join(HERE, f"leaderboard_{key}.csv"))
-    pr = pd.read_csv(os.path.join(HERE, f"predictions_{key}.csv"))
+    lb = pd.read_csv(os.path.join(DAT, f"leaderboard_{key}.csv"))
+    pr = pd.read_csv(os.path.join(DAT, f"predictions_{key}.csv"))
     mae_in, mae_out = zone_mae(pr["Time-DC"].to_numpy(),
                                pr["Soot left-mg"].to_numpy(),
                                pr["Soot left-mg (pred)"].to_numpy())

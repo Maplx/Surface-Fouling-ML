@@ -17,7 +17,7 @@ plot — both the true-vs-predicted values we drew, and the full leaderboard of 
 ten models we tried, so you can see why a given "best model" won.
 
 ```
-soot_mass_resistance_only/
+soot_mass_sensor_signals/
 ├── datasets/native_379.csv
 ├── 01_temperature_reveal/
 ├── 02_predict_T_from_R/
@@ -129,9 +129,9 @@ resistance alone.
 ## Running it again
 
 ```bash
-python soot_mass_resistance_only/01_temperature_reveal/run.py
-python soot_mass_resistance_only/02_predict_T_from_R/run.py
-python soot_mass_resistance_only/03_resistance_derived_features/run.py
+python soot_mass_sensor_signals/01_temperature_reveal/run.py
+python soot_mass_sensor_signals/02_predict_T_from_R/run.py
+python soot_mass_sensor_signals/03_resistance_derived_features/run.py
 ```
 
 Each script stands on its own, reads only `datasets/native_379.csv`, writes its

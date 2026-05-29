@@ -26,7 +26,7 @@ Outputs (next to this script):
   predictions_R_dRdt_cumR.csv      true vs predicted for the headline set
   predictions_cumR_only.csv        true vs predicted for cumR alone
 
-Run:  python soot_mass_resistance_only/03_resistance_derived_features/run.py
+Run:  python soot_mass_sensor_signals/03_resistance_derived_features/run.py
 """
 
 import os

@@ -17,7 +17,7 @@ Outputs (next to this script):
   leaderboard.csv           full 10-model leaderboard (best = top row)
   predictions.csv           true vs predicted Temperature at each test point
 
-Run:  python soot_mass_resistance_only/02_predict_T_from_R/run.py
+Run:  python soot_mass_sensor_signals/02_predict_T_from_R/run.py
 """
 
 import os

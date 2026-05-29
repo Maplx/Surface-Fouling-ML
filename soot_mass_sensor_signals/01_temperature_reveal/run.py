@@ -24,7 +24,7 @@ Outputs (next to this script):
   predictions_T.csv         true vs predicted soot mass at each test point (T)
   predictions_RT.csv        true vs predicted soot mass at each test point (R+T)
 
-Run:  python soot_mass_resistance_only/01_temperature_reveal/run.py
+Run:  python soot_mass_sensor_signals/01_temperature_reveal/run.py
 """
 
 import os

@@ -13,9 +13,16 @@ Story this figure tells:
     grip on soot mass -- the two failures are the same failure.
 
 Outputs (next to this script):
-  figures/figure_T_from_R.png   measured vs predicted Temperature over time
-  data/leaderboard.csv          full 10-model leaderboard (best = top row)
-  data/predictions.csv          true vs predicted Temperature at each test point
+  figures/figure_T_from_R.png        measured vs predicted Temperature over time
+  figures/diagnostic_R_flatlines.png R, T and Soot vs time -- R flatlines in the
+                                     window while T and Soot keep evolving
+  figures/diagnostic_R_vs_soot.png   R-vs-Soot (L-shape / hysteresis: one R maps
+                                     to many Soot values) + twin-axis time series
+  data/leaderboard.csv               full 10-model leaderboard (best = top row)
+  data/predictions.csv               true vs predicted Temperature at each test point
+
+The two diagnostic figures are plotted directly from datasets/native_379.csv
+(raw signals, no model) -- that CSV is their data.
 
 Run:  python soot_mass_sensor_signals/02_predict_T_from_R/run.py
 """
@@ -112,4 +119,67 @@ plt.close()
 
 print(f"best={best['name']}  R2={best['r2']:+.4f}  "
       f"MAE_in={mae_in:.2f}  MAE_out={mae_out:.2f} deg C  ratio={mae_in/mae_out:.1f}x")
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics straight from the raw signals (no model) — the "why" behind Act 2.
+# ---------------------------------------------------------------------------
+R = d["Resistance"].to_numpy()
+T = d["Temp-DC"].to_numpy()
+S = d["Soot left-mg"].to_numpy()
+inside = (t >= ZONE[0]) & (t <= ZONE[1])
+
+
+def band_stats(v):
+    vi, vo = v[inside], v[~inside]
+    return (f"in-window: std={vi.std():.1f}, range={vi.max()-vi.min():.1f}\n"
+            f"elsewhere: std={vo.std():.1f}, range={vo.max()-vo.min():.1f}")
+
+
+# Diagnostic 1: R, T, Soot vs time — R flatlines while T and Soot keep moving.
+fig, ax = plt.subplots(3, 1, figsize=(11, 8), sharex=True)
+for a, v, lab, col, unit in [
+        (ax[0], R, "Resistance", "tab:blue", "ohm"),
+        (ax[1], T, "Temperature", "tab:red", "deg C"),
+        (ax[2], S, "Soot left", "tab:green", "mg")]:
+    a.plot(t, v, color=col)
+    a.axvspan(*ZONE, color="red", alpha=0.10)
+    a.set_ylabel(f"{lab} ({unit})")
+    a.set_title(f"{lab} vs time", fontsize=10)
+    a.grid(alpha=0.3)
+    a.text(0.985, 0.05, band_stats(v), transform=a.transAxes, ha="right", va="bottom",
+           fontsize=8, family="monospace",
+           bbox=dict(boxstyle="round", fc="white", ec="0.7", alpha=0.9))
+ax[2].set_xlabel("Time-DC (s)")
+fig.suptitle("Inside the oxidation window R has flatlined, but Temperature and Soot "
+             "are still evolving\n-> a single R value has no information left to "
+             "tell those points apart", fontsize=11)
+plt.tight_layout()
+fig.savefig(os.path.join(FIG, "diagnostic_R_flatlines.png"), dpi=150, bbox_inches="tight")
+plt.close()
+
+# Diagnostic 2: R-vs-Soot (colored by time) + twin-axis time series.
+fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+sc = axes[0].scatter(R, S, c=t, cmap="viridis", s=16)
+axes[0].set_xlabel("Resistance (ohm)")
+axes[0].set_ylabel("Soot left (mg)")
+axes[0].set_title("Resistance vs Soot (color = time)\nL-shape: one low R maps to many Soot values")
+axes[0].grid(alpha=0.3)
+plt.colorbar(sc, ax=axes[0], label="Time-DC (s)")
+a = axes[1]
+a.plot(t, R, color="tab:blue", label="Resistance")
+a.set_xlabel("Time-DC (s)")
+a.set_ylabel("Resistance (ohm)", color="tab:blue")
+a.tick_params(axis="y", labelcolor="tab:blue")
+a.axvspan(*ZONE, color="red", alpha=0.08)
+ab = a.twinx()
+ab.plot(t, S, color="tab:red", label="Soot left")
+ab.set_ylabel("Soot left (mg)", color="tab:red")
+ab.tick_params(axis="y", labelcolor="tab:red")
+a.set_title("Time series: Resistance vs Soot")
+a.grid(alpha=0.3)
+plt.tight_layout()
+fig.savefig(os.path.join(FIG, "diagnostic_R_vs_soot.png"), dpi=150, bbox_inches="tight")
+plt.close()
+
 print(f"[DONE] artifacts in {HERE}")

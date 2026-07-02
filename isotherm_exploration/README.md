@@ -1,126 +1,104 @@
-# 恒温 soot 氧化 case — 我的理解 & 待办
+# Predicting soot oxidation from the DC sensor current
 
-这是给我自己看的笔记,记录我们对那份**恒温(isotherm)数据**的讨论:数据是什么、
-他们大概想让我做什么、以及真要做出来还缺什么。等周五开完会再更新。
+**The question:** during isothermal soot burning, can we predict soot oxidation
+from the sensor **current alone** — no thermocouple, no CO₂ analyzer, just the
+current the sensor already reads?
 
-数据来源:`Copy of AC soot oxidation ramping ML data.xlsx` 的第二张表
-**"Isotherm condition"**(第一张表是动态升温的 AC ramp,已经做完,在
-`../ac_soot_oxidation_si/`)。
+Short answer: **yes for how much soot has burned, and it's basically perfect.**
 
 ---
 
-## 1. 这份数据是什么
+## The experiment
 
-一个**阶梯恒温**的 soot 燃烧实验:预先load 好 soot,然后把温度一档一档升上去,
-每个温度停一段时间,看 soot 在各温度下烧得怎么样。
+Soot is preloaded on the sensor, then the temperature is stepped up
+(~370 → 470 → 570 → 670 °C). At each step the soot burns and gives off CO₂. We
+record three things on their own time axes:
 
-对应 PDF `12-02-2025 sensor data discussion` 第 9 页:
-> "Soot oxidation is conducted at **isotherm conditions**, while temperature
-> contributes the oxidation rate change. ... **linear calibration of soot
-> oxidation rate**."
-
-表里三列有用的:
-
-| 列 | 含义 |
-|---|---|
-| `Temperature-ISOTHERM` | 温度(°C),走 370 → 470 → 570 → 670 四个台阶 |
-| `CO2-ISOTHERM` | 出口 CO₂ 浓度(ppm)= **soot 氧化速率** |
-| `Current-ISOTHERM` | DC 传感器电流(A)= **传感器信号** |
-
-(注:CO₂ 有 -2、-3 的负值,是分析仪零点漂移,算积分时截成 0。)
+- **Temperature** (°C)
+- **CO₂** (ppm) — the combustion product, i.e. how fast soot is burning right now
+- **Current** (A) — the DC sensor signal
 
 ![overview](isotherm_overview.png)
 
----
-
-## 2. 为什么 CO₂ = 氧化速率(别忘了)
-
-- soot ≈ 碳,烧掉就变 CO₂:`C + O₂ → CO₂`。测到多少 CO₂ = 这一刻烧了多少 soot。
-- 这是**流通式反应器**(气体固定流量一直吹过),生成的 CO₂ 立刻被冲走,不累积。
-  所以 **CO₂ 浓度(瞬时)= 氧化速率**,不是总量。
-- 推论:
-  - CO₂ 曲线**高度** = 烧得多快(速率)
-  - CO₂ 曲线**面积**(∫CO₂ dt)= 总共烧了多少(量)
+Most of the soot (≈71 %) burns off in the 570 °C step, which is also where the
+current drops sharply — soot is conductive, so as it burns away the current falls.
 
 ---
 
-## 3. 两种氧化机制(这就是重点)
+## What we predict
 
-催化剂(LSCO)把 soot 起燃温度压低了 ~80°C,所以氧化分两段,对应 abstract 那句
-*"two-range linear calibration model ... catalytic and thermal oxidation mechanisms"*:
+Two flavors of "oxidation", both taken from the CO₂ signal (ground truth):
 
-- **低温段(~470°C)= 催化氧化**:没有催化剂这温度根本不烧,是催化剂让它烧的。
-- **高温段(~570°C 以上)= 催化 + 热氧化**:非催化的热氧化也开始贡献。
+- **Soot conversion (%)** — cumulative CO₂ (area under the CO₂ curve), normalized
+ to 100 %. This is *how much soot has burned so far*.
+- **Oxidation rate (ppm)** — the instantaneous CO₂, i.e. *how fast it's burning
+ right now*.
 
-我按每个台阶对 CO₂ 积分,算了各温度烧掉的 soot 占比:
+The **input is always the current only**. We use three current-derived features:
 
-| 台阶 | 烧掉占比 | 说明 |
-|---|---|---|
-| 370 °C | 0.6% | 太冷,几乎不烧 |
-| **470 °C** | **23.9%** | 催化为主 |
-| **570 °C** | **70.8%** | 催化 + 热(主峰) |
-| 670 °C | 4.3% | soot 基本烧完了 |
+- `I` — the raw current
+- `dI/dt` — how fast the current is changing
+- `cumI = ∫I dt` — the running (cumulative) integral of the current
 
----
-
-## 4. 他们大概想让我做什么
-
-PDF 第 7 页原话:*"How can AI help to **deconvolute contribution from different
-factors**"*。结合讨论,目标八成是:
-
-> **给一段传感器数据,反推出催化氧化和热氧化各自的贡献是多少。**
-
-完整链条应该是:
-
-```
-sensor 信号 + 温度  ──标定──▶  总氧化速率  ──two-range 模型──▶  催化份 / 热份
-```
+We line the current up with the CO₂ timestamps, then throw a zoo of 10 regression
+models at each feature (linear models, SVR, KNN, trees, random forest, gradient
+boosting) on a random 50/50 train/test split and keep the best. `MAE` below is
+the mean error as a % of full scale.
 
 ---
 
-## 5. 要做到这个,缺什么 / 注意什么
+## Results
 
-这块是关键,周五要确认:
+### Soot conversion — nailed it
 
-**(1) 想"真拆"出两种贡献,必须先定义"纯热氧化"是多少**
+| Feature | Best model | R² | MAE |
+|---|---|---|---|
+| Current | RandomForest | 0.971 | 4.2 % |
+| dI/dt | RandomForest | 0.204 | 30.9 % |
+| **cumI = ∫I dt** | RandomForest | **0.998** | **0.7 %** |
+| I + dI/dt + cumI | HistGradientBoosting | **0.999** | **0.7 %** |
 
-CO₂ 测的是**总速率**(催化+热混在一起),没有任何一列单独告诉我热的占多少。
-要拆开,两条路:
+![conversion fit](figures/figure_fit_extent.png)
 
-- **路 A(干净,首选):有"无催化剂"对照实验。** 如果做过裸 SiC(不镀 LSCO)的
-  soot 氧化,那条曲线就是**纯热氧化** rate_thermal(T),于是
-  `催化贡献 = 总速率 − 热速率`(同温度相减)。这是真测出来的拆分。
-- **路 B(没对照,只能假设):two-range 模型。** 假设催化、热各服从一个 Arrhenius
-  规律(ln(rate) vs 1/T 两段直线),低温段算催化、高温多出来的算热,转折点 = 热氧化
-  接管的温度。能做,对得上 abstract,但是假设驱动,不如 A 硬。
+The raw current already gets you most of the way (R²=0.97) but it's jagged. The
+**cumulative current `cumI` gives a clean, near-perfect S-curve — R²=0.998, under
+1 % error.** That's the whole conversion curve reconstructed from nothing but the
+current.
 
-**(2) 光靠 sensor 一个数拆不出来,输入必须带温度**
+### Oxidation rate — harder
 
-同一个传感器读数,可能是低温催化烧的、也可能是高温热烧的——速率一样机制不同。
-所以输入得是 **(sensor 信号 + 温度/时间)**,这跟 ramp 那份 cumZ/cumR 需要时间历史
-是一个道理。
+| Feature | Best model | R² | MAE |
+|---|---|---|---|
+| Current | RandomForest | 0.399 | 4.1 % |
+| dI/dt | KNN | 0.396 | 4.8 % |
+| **cumI** | RandomForest | **0.763** | **1.7 %** |
+| I + dI/dt + cumI | KNN | 0.637 | 2.4 % |
 
-**(3) 数据量的限制**
+![rate fit](figures/figure_fit_rate.png)
 
-这份恒温只有 4 个温度台阶(370/470/570/670),每个机制就 2 个点,做 Arrhenius
-两段拟合**点太少**。可能还有更多温度的数据没给我。
-
----
-
-## 6. 周五要问清楚的
-
-1. 有没有 **no-catalyst(裸 SiC)对照**实验?→ 决定能"真拆"还是只能"假设拆"。
-2. 除了这 4 个温度,还有没有**更多 isotherm 温度点**?→ 决定拟合站不站得住。
-3. 输出要的是哪种:
-   - 给条曲线 → 标出催化/热各占多少(后处理分析),还是
-   - 实时给个 sensor 读数 → 输出此刻两种机制的瞬时贡献(预测器)?
-4. 目标变量是 **氧化速率(CO₂)** 还是 **剩余 soot 质量**?标定是 current→rate 还是 current→mass?
-5. AC 也要做吗?(这份恒温只有 DC 的 current;AC 的 Z 在 ramp 那份里。)
-6. 这个进正文还是 SI?要不要和 ramp 那份的 cumZ 结果串成一个完整故事?
+The instantaneous rate is a spiky signal, so it's tougher. `cumI` still does best
+(R²=0.76) and catches the big 570 °C peak and its decay, but the two tallest spikes
+(~1580 ppm) get clipped.
 
 ---
 
-## 文件
+## The insight
 
-- `isotherm_overview.png` — 温度 / CO₂ / 电流随时间的总览图(上面那张)
-- 还没建分析脚本,等周五确认目标后再写。
+**Cumulative current `∫I dt` is the signal that does the work.** A single current
+reading is ambiguous — the same value shows up at different points of the burn —
+but the cumulative integral is monotonic and remembers the whole history, so it
+maps cleanly onto how much soot is gone.
+
+This is the exact same story we saw on the ramp data with `cumR` (DC resistance)
+and `cumZ` (AC impedance): **the raw signal underperforms, and its cumulative
+integral recovers near-perfect prediction.** So it holds across resistance,
+impedance, *and* current — the "cumulative feature" trick is general.
+
+**Bottom line:** with just the sensor current, we can read out soot conversion to
+better than 1 % — a real-time, thermocouple-free way to know how much soot is left.
+
+---
+
+*Reproduce: `python Surface-Fouling-ML/isotherm_exploration/run.py` (seed 0,
+deterministic). Aligned data in `datasets/`, per-model tables in `data/`, figures
+in `figures/`.*

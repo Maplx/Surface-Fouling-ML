@@ -70,7 +70,8 @@ The initial mass in the DC ramp is 0.5 mg.
 | `12-02-2025 sensor data discussion (1) copy.pdf` | Background on the sensor and the experiments |
 
 Each study folder has its own README, a `run.py` that regenerates its results,
-and `data/`, `datasets/` and `figures/` subfolders.
+and `data/` and `figures/` subfolders. The soot studies also keep their input
+table in `datasets/`.
 
 ## Setup
 
@@ -100,5 +101,5 @@ them in the directory that contains the `Surface-Fouling-ML` folder:
 | `isotherm_exploration_2/run.py` | `New isothermal soot oxidation date.xlsx` |
 | `thickness_from_Z/run.py` | `three different tests results.xlsx` |
 
-The aligned tables these scripts produce are already saved in each folder's
-`datasets/`, so the results can be inspected without the Excel files.
+The results these scripts produce are already saved in each folder, so they can
+be inspected without the Excel files.
